@@ -15,20 +15,46 @@ const LaunchRequestHandler = {
         return responseBuilder.getResponse()
     },
 }
-const SearchHandler = {
+const searchHandler = {
     canHandle(handlerInput) {
         return handlerInput.requestEnvelope.request.type === 'IntentRequest' && handlerInput.requestEnvelope.request.intent.name === 'SearchIntent'
     }, async handle(handlerInput) {
         const { responseBuilder } = handlerInput
+        console.log(handlerInput.requestEnvelope.request.intent.name)
         let queriedData = await queryData(handlerInput.requestEnvelope.request.intent.slots.query.value)
         let parsedData = await parseData(queriedData, 0)
         //handlerInput.responseBuilder.speak(`Now Playing ${parsedData.title}`)
-        responseBuilder.speak(`Now playing ${parsedData.title}`).withShouldEndSession(true) //Playing song
-        addAudioPlayerPlayDirective(responseBuilder, 'REPLACE_ALL', parsedData)
+        /*
+        setTimeout(function() {
+            addAudioPlayerPlayDirective(responseBuilder, 'REPLACE_ALL', parsedData)
+            return responseBuilder.getResponse()
+        }, 500)
+        */
+        responseBuilder.addAudioPlayerPlayDirective('REPLACE_ALL', parsedData.url, "streamID", 0)
         return responseBuilder.getResponse()
+        /*
+            {
+            "title": parsedData.title,
+            "subtitle": parsedData.channel,
+            "art": {
+                "sources": [
+                    {
+                        "url": parsedData.thumbnail
+                    }
+                ]
+            },
+            "backgroundImage": {
+                "sources": [
+                    {
+                        "url": parsedData.thumbnail
+                    }
+                ]
+            }
+        })
+        */
     }
 }
-const CancelAndStopIntentHandler = {
+const stopHandler = {
     canHandle(handlerInput) {
         return handlerInput.requestEnvelope.request.type === 'IntentRequest'
             && (
@@ -70,24 +96,8 @@ const ErrorHandler = {
 }
 const addAudioPlayerPlayDirective = (responseBuilder, type, song, offset = 0, streamId = "stream-id", previousStreamId = "stream-id") => {
     if (type !== "ENQUEUE") previousStreamId = null
-    responseBuilder.addAudioPlayerPlayDirective(type, song.url, streamId, offset, previousStreamId, {
-        "title": song.title,
-        "subtitle": song.artist,
-        "art": {
-            "sources": [
-                {
-                    "url": song.thumbnail
-                }
-            ]
-        },
-        "backgroundImage": {
-            "sources": [
-                {
-                    "url": song.thumbnail
-                }
-            ]
-        }
-    })
+    //this project is probably going to be scrapped since addAudioPlayerPlayDirective will only accept https audio streams. It is impossible to use ytdl without something like dropbox to take the stream and upload it to a useable format
+    responseBuilder.addAudioPlayerPlayDirective(type, parsedData.url, streamId, offset)
 }
 //music shit
 async function queryData(query){
@@ -124,9 +134,9 @@ async function parseData(videos, item){
 }
 exports.handler = skillBuilder
     .addRequestHandlers(
-        SearchHandler,
+        searchHandler,
         LaunchRequestHandler,
-        CancelAndStopIntentHandler,
+        stopHandler,
         ExceptionEncounteredRequestHandler,
         SessionEndedRequestHandler
     )
