@@ -1,107 +1,93 @@
-'use strict';
 const config = require('./config.json')
 const {google} = require('googleapis');
 const ytdl = require('ytdl-core');
 var yt = google.youtube('v3');
 const Alexa = require('ask-sdk-core');
 const skillBuilder = Alexa.SkillBuilders.custom();
-/* legacy shit
-const PlayStreamIntentHandler = {
+//handlers
+const LaunchRequestHandler = {
     canHandle(handlerInput) {
-        return handlerInput.requestEnvelope.request.type === 'LaunchRequest' ||
-            handlerInput.requestEnvelope.request.type === 'IntentRequest' &&
-            (
-                handlerInput.requestEnvelope.request.intent.name === 'SearchIntent'
-            );
+        return handlerInput.requestEnvelope.request.type === 'LaunchRequest'
+    },
+    async handle(handlerInput) {
+        const { responseBuilder } = handlerInput
+        handlerInput.responseBuilder.speak(`Welcome to youtube!`)
+        return responseBuilder.getResponse()
+    },
+}
+const SearchHandler = {
+    canHandle(handlerInput) {
+        return handlerInput.requestEnvelope.request.type === 'IntentRequest' && handlerInput.requestEnvelope.request.intent.name === 'SearchIntent'
+    }, async handle(handlerInput) {
+        const { responseBuilder } = handlerInput
+        let queriedData = await queryData(handlerInput.requestEnvelope.request.intent.slots.query.value)
+        let parsedData = await parseData(queriedData, 0)
+        //handlerInput.responseBuilder.speak(`Now Playing ${parsedData.title}`)
+        responseBuilder.speak(`Now playing ${parsedData.title}`).withShouldEndSession(true) //Playing song
+        addAudioPlayerPlayDirective(responseBuilder, 'REPLACE_ALL', parsedData)
+        return responseBuilder.getResponse()
+    }
+}
+const CancelAndStopIntentHandler = {
+    canHandle(handlerInput) {
+        return handlerInput.requestEnvelope.request.type === 'IntentRequest'
+            && (
+                handlerInput.requestEnvelope.request.intent.name === 'AMAZON.StopIntent' ||
+                handlerInput.requestEnvelope.request.intent.name === 'AMAZON.PauseIntent' ||
+                handlerInput.requestEnvelope.request.intent.name === 'AMAZON.CancelIntent'
+            )
+    }, async handle(handlerInput) {
+        handlerInput.responseBuilder.addAudioPlayerStopDirective()
+        return handlerInput.responseBuilder.getResponse()
+    },
+}
+const SessionEndedRequestHandler = {
+    canHandle(handlerInput) {
+        return handlerInput.requestEnvelope.request.type === 'SessionEndedRequest'
     },
     handle(handlerInput) {
-        let stream = STREAMS[0];
-        handlerInput.responseBuilder
-            .speak(`I heard you loud and clear!`)
-            //.addAudioPlayerPlayDirective('REPLACE_ALL', stream.url, stream.token, 0, null, stream.metadata);
-        return handlerInput.responseBuilder
-            .getResponse();
+        console.log(`Something went wrong: ${handlerInput.requestEnvelope.request.reason}`)
+        return handlerInput.responseBuilder.getResponse()
     },
-};
+}
+const ExceptionEncounteredRequestHandler = {
+    canHandle(handlerInput) {
+        return handlerInput.requestEnvelope.request.type === 'System.ExceptionEncountered'
+    },
+    handle(handlerInput) {
+        console.log(`Something went wrong: ${handlerInput.requestEnvelope.request.reason}`)
+        return true
+    },
+}
 const ErrorHandler = {
     canHandle() {
-        return true;
+        return true
     },
-    handle(handlerInput, error) {
-        console.log(`Error handled: ${error.message}`);
-        return handlerInput.responseBuilder
-            .addAudioPlayerClearQueueDirective('CLEAR_ALL')
-            .addAudioPlayerStopDirective()
-            .getResponse();
+    async handle(handlerInput, error) {
+        console.log(`Error handled: ${error.message}`)
+        return handlerInput.responseBuilder.getResponse()
     },
-};
-exports.handler = skillBuilder
-    .addRequestHandlers(
-        PlayStreamIntentHandler,
-    )
-    .addErrorHandlers(ErrorHandler)
-    .lambda();
-*/
-exports.handler = function (event, context) {
-    try {
-        if (event.session.new) {
-            onSessionStarted({requestId: event.request.requestId}, event.session);
-        }
-        if (event.request.type === "LaunchRequest") {
-            onLaunch(event.request,
-                event.session,
-                function callback(sessionAttributes, speechletResponse) {
-                    context.succeed(buildResponse(sessionAttributes, speechletResponse));
-                });
-        } else if (event.request.type === "IntentRequest") {
-            onIntent(event.request,
-                event.session,
-                function callback(sessionAttributes, speechletResponse) {
-                    context.succeed(buildResponse(sessionAttributes, speechletResponse));
-                });
-        } else if (event.request.type === "SessionEndedRequest") {
-            onSessionEnded(event.request, event.session);
-            context.succeed();
-        }
-    } catch (e) {
-        context.fail("Exception: " + e);
-    }
-};
-//Called when the session starts.
-function onSessionStarted(sessionStartedRequest, session) {
-    console.log("onSessionStarted requestId=" + sessionStartedRequest.requestId + ", sessionId=" + session.sessionId);
-    // add any session init logic here
 }
-//Called when the user invokes the skill without specifying what they want.
-function onLaunch(launchRequest, session, callback) {
-    var titleBox = "Youtube Music",
-        textBox = "Usage: Ask alexa to play {Song}",
-        speech = "Hello there! You can search youtube by saying. Alexa, ask youtube to play your song";
-    callback(session.attributes, buildSpeechletResponse(titleBox, textBox, speech, "", true));
-
-}
-//Called when the user specifies an intent for this skill.
-async function onIntent(intentRequest, session, callback) {
-    var intent = intentRequest.intent,
-        intentName = intentRequest.intent.name,
-        query = intentRequest.intent.slots.query.value,
-        titleBox = "Youtube Music";
-    // dispatch custom intents to handlers here
-    if (intentName == 'SearchIntent') {
-        if(query){
-            let queriedData = await queryData(query)
-            let parsedData = await parseData(queriedData, 0)
-            let speech = "Now playing "+parsedData.title.toString(),
-                textBox = parsedData.title.toString();
-            callback(session.attributes, buildSpeechletResponse(titleBox, textBox, speech, "", true));
+const addAudioPlayerPlayDirective = (responseBuilder, type, song, offset = 0, streamId = "stream-id", previousStreamId = "stream-id") => {
+    if (type !== "ENQUEUE") previousStreamId = null
+    responseBuilder.addAudioPlayerPlayDirective(type, song.url, streamId, offset, previousStreamId, {
+        "title": song.title,
+        "subtitle": song.artist,
+        "art": {
+            "sources": [
+                {
+                    "url": song.thumbnail
+                }
+            ]
+        },
+        "backgroundImage": {
+            "sources": [
+                {
+                    "url": song.thumbnail
+                }
+            ]
         }
-    }
-    else {
-        throw "Invalid intent";
-    }
-}
-function onSessionEnded(sessionEndedRequest, session) {
-    console.log("onSessionEnded requestId=" + sessionEndedRequest.requestId + ", sessionId=" + session.sessionId);
+    })
 }
 //music shit
 async function queryData(query){
@@ -136,45 +122,13 @@ async function parseData(videos, item){
         })
     }
 }
-//response templates
-function buildSpeechletResponse(titleBox, textBox, speech, repromptText, shouldEndSession) {
-    return {
-        outputSpeech: {type: "PlainText", text: speech},
-        card: {type: "Simple", title: titleBox, content: textBox},
-        reprompt: {
-            outputSpeech: {type: "PlainText", text: repromptText}
-        },
-        shouldEndSession: shouldEndSession
-    };
-}
-function build_audio_speechlet_response(titleBox, textBox, speech, repromptText, should_end_session, url, token, offsetInMilliseconds=0) {
-    return {
-        outputSpeech: {type: "PlainText", text: speech},
-        card: {type: "Simple", title: titleBox, content: textBox},
-        reprompt: {
-            outputSpeech: {type: "PlainText", text: repromptText}
-        },
-        directives: [{
-            type: audioItem.stream,
-            playBehavior: 'REPLACE_ALL',
-            audioItem: {
-                stream: {
-                    token: 'NEED TO FIGURE OUT WHAT THIS DOES',
-                    url: 'yourtube url?',
-                    offsetInMilliseconds: 'idk'
-                }
-            }
-        }],
-        shouldEndSession: shouldEndSession
-    }
-}
-function buildResponse(sessionAttributes, speechletResponse) {
-    return {
-        version: "1.0",
-        sessionAttributes: sessionAttributes,
-        response: speechletResponse
-    };
-}
-
-
-
+exports.handler = skillBuilder
+    .addRequestHandlers(
+        SearchHandler,
+        LaunchRequestHandler,
+        CancelAndStopIntentHandler,
+        ExceptionEncounteredRequestHandler,
+        SessionEndedRequestHandler
+    )
+    .addErrorHandlers(ErrorHandler)
+    .lambda()
